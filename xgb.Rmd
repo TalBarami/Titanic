@@ -82,49 +82,40 @@ train<- df[indices,]
 test<- df[-indices,]
 ```
 
-# Train a naive bayes model based on the train data.
+
+Train a gbm decision-tree model based on the train data.
 ```{r}
-library(e1071)
-set.seed(13)
-nb <- naiveBayes(Survived~.,data = train)
+library(caret)
+library(lattice)
+
+
+set.seed(123)
+control <- trainControl(method="cv", number=5)
+
+grid <- expand.grid(.nrounds=20,.max_depth=6,.eta=c(0.1,0.3,0.5),.gamma=0.1,.colsample_bytree=0.5,.min_child_weight=0.01,.subsample=0.7)
+
+fit.xgb <- train(Survived~., data=df, method="xgbTree", metric="Accuracy", trControl=control, verbose=FALSE,tuneGrid =grid, na.action=na.pass)
 ```
 
 
 
-Predict the target feature for records of the test set, using the trained model.
-
-```{r}
-nb_pred <- predict(nb, test, na.action = na.pass)
-```
 
 
-Produce a confusion matrix between predicted target attributes and real target attributes of the test set.
 
-```{r}
-table(nb_pred,test$Survived)
-```
+14. Load the test file. Don't forget the empty strings issue when loading the file (na.strings = "").
 
-
-Calculate the model's test accuracy.
-
-```{r}
-mean(nb_pred==test$Survived)
-```
-
-
-Load the test file.
 ```{r}
 new_df <-read.csv('Titanic/test.csv',na.strings = "")
 ```
 
-Create a vector with the PassengerIds of records in the test file. We will soon attach it to the prediction results.
+15. Create a vector with the PassengerIds of records in the test file. We will soon attach it to the prediction results.
 
 ```{r}
 ids<- new_df$PassengerId
 ```
 
 
-Repeat the same preprocessing steps that were performed on the train data (factorizing two features and ignoring three features). Train and test data must have the same structure (except for the target feature)
+16. Repeat the same preprocessing steps that were performed on the train data (factorizing two features and ignoring three features). You must make sure that the train and test data have the same structure (except for the target feature)
 
 ```{r}
 new_df$Pclass<- as.factor(new_df$Pclass)
@@ -132,7 +123,7 @@ new_df<- new_df[,-c(1,3,8)]
 ```
 
 
-Another thing that is going to make troubles is that the test data contains some new levels in the *Cabin* feature that did not appear in the train data.
+17. Another thing that is going to make troubles is that the test data contains some new levels in the *Cabin* feature that did not appear in the train data (you can check it by applying *Summary* on the test data). Add these new levels to the model.
 
 - Getting the levels of the "Cabin" feature from a model *m*: m$xlevels[["Cabin"]]
 
@@ -142,14 +133,14 @@ Another thing that is going to make troubles is that the test data contains some
 
 
 ```{r}
-nb$xlevels[["Cabin"]] <- union(nb$xlevels[["Cabin"]], levels(new_df$Cabin))
+fit.xgb$xlevels[["Cabin"]] <- union(fit.xgb$xlevels[["Cabin"]], levels(new_df$Cabin))
 ```
 
 
-Load the test file and predict the target attribute for its records using your trained model. Don't forget to set *na.action* to "na.pass" if you used caret in the model creation, otherwise it will fail.
+18. Load the test file and predict the target attribute for its records using your trained model. Don't forget to set *na.action* to "na.pass" if you used caret in the model creation, otherwise it will fail.
 
 ```{r}
-new_pred<- predict(nb,new_df,na.action = na.pass)
+new_pred<- predict(fit.xgb,new_df,na.action = na.pass)
 ```
 
 
@@ -157,7 +148,7 @@ new_pred<- predict(nb,new_df,na.action = na.pass)
 
 ```{r}
 res <- cbind(PassengerId=ids,Survived=as.character(new_pred))
-write.csv(res,file="Titanic/naiveBayes.csv",row.names = F)
+write.csv(res,file="Titanic/xgb.csv",row.names = F)
 
 ```
 

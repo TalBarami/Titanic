@@ -9,59 +9,57 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Set working directory:
 ```{r}
-knitr::opts_knit$set(root.dir = 'C:\\Users\\Tal\\Dropbox\\Semester 7\\Application of Data Analysis Methods\\Assignments\\2')
+knitr::opts_knit$set(root.dir = 'C:\\Users\\Tal\\Desktop\\Titanic\\Titanic')
 getwd()
 ```
-3. Read the train.csv file into a dataframe. Use the parameter na.strings = "" to recognize empty strings as null values, otherwise these empty strings might raise errors when creating a model.
+
+Read the train.csv file into a dataframe. 
 ```{r}
 df <- read.csv("Titanic/train.csv",na.strings = "")
-
 ```
 
-4. Check the datatypes of the attributes using the *str* method. You should find two numeric features that must be converted into factors. Convert these two features to factors
+
+Check the datatypes of the attributes using the *str* method. 
 ```{r}
 str(df)
 ```
 
+Convert numeric features into factors.
 ```{r}
 df$Survived<- as.factor(df$Survived)
 df$Pclass<- as.factor(df$Pclass)
 ```
 
-5. Produce some descriptive statistics using the *Summary* method, and read it to get to know your data. Do you have missing data(NA) inside? If so, you should either preprocess the data to have non NAs, or use only models that can handle missing values. We will go with the second option, so you don't need to preprocess the data for now.
+Produce some descriptive statistics using the *Summary* method, and read it to get to know your data. Do you have missing data(NA) inside? If so, you should either preprocess the data to have non NAs, or use only models that can handle missing values. We will go with the second option, so you don't need to preprocess the data for now.
 ```{r}
 summary(df)
 ```
 
-6. It seems that the following features have too many categories or simply represent an index: PassengerId, Ticket, Name. You should either extract some stronger feature out of it (like getting honorific abbreviations out of the name: Mrs., Dr. etc.), or ignore these features. We will go with the second option; Remove these features from your dataframe.
+It seems that the following features have too many categories or simply represent an index: PassengerId, Ticket, Name. We'll ignore these features.
 ```{r}
 df <- df[,-c(1,4,9)]
-
 ```
 
-7. (*Non-mandatory) Visualize the behavior of each feature vs. the target feature (surviving or not). View your graphs to gain an understanding which of the features explain the target feature.
 
-
-It is easier to explore factors and numeric features separately. Here we divide the features' names to numerics and factors:
+Divide the features' names to numerics and factors:
 ```{r}
 cols<- 1:dim(df)[2]
 factors <- cols[sapply(df,is.factor)]
 numerics <- cols[!sapply(df,is.factor)]
 ```
 
-We now tide the data two times: the first is for categorial data and the second for numeric data.
-
+Tide the data two times: the first is for categorial data and the second for numeric data.
 ```{r}
 #install.packages("tidyr")
 library(tidyr)
 df_tidy_factors<-gather(df[,factors],"feature","value",-1)
 df_tidy_numerics<-gather(cbind(Survived=df[,1],df[,numerics]),"feature","value",-1)
-
 ```
 
 
-Finally, we can plot. The first plot describes only categorical features (factors). 
+The first plot describes only categorical features (factors). 
 Notice that the *scales* parameter was set to "free" to enable a suitable scaling for each facet (otherwise it is hard to view some of the facets, that need much smaller scales). We use the *facet_grid* that accepts a *scales* parameter.
 
 ```{r}
@@ -70,97 +68,122 @@ library(ggplot2)
 qplot(x=value,data=df_tidy_factors,fill=Survived) + facet_grid(~feature,scales="free")
 ```
 
-
 One more plot for numeric features:
 ```{r}
 qplot(x=value,data=df_tidy_numerics,fill=Survived) + facet_grid(~feature,scales="free")
 ```
 
-It certainly looks luck there are more chances to survive in certain levels of almost each feature.
+It certainly looks like there are more chances to survive in certain levels of almost each feature.
 
-
-
-8. Split the data into 75% train and 25% test sets.
-
+Split the data into 80% train and 20% test sets.
 ```{r}
-indices <- sample(1:nrow(df),nrow(df)*0.75)
+indices <- sample(1:nrow(df),nrow(df)*0.7)
 train<- df[indices,]
 test<- df[-indices,]
 ```
 
-
-9. Train a C5.0 decision-tree model based on the train data.
-
+# Train a naive bayes model:
 ```{r}
-#install.packages("C50")
-library(C50)
-set.seed(123)
-C50 <-C5.0(Survived ~., data=train )
+library(e1071)
+set.seed(13)
+nb <- naiveBayes(Survived~.,data = train)
 ```
 
+Predict the target feature for records of the test set, using the trained model.
 ```{r}
-plot(C50)
+nb_pred <- predict(nb, test, na.action = na.pass)
 ```
 
-
-10. Predict the target feature for records of the test set, using the trained model.
-
+Produce a confusion matrix between predicted target attributes and real target attributes of the test set.
 ```{r}
-pred <- predict(C50,test)
+table(nb_pred,test$Survived)
 ```
 
-
-11. Produce a confusion matrix between predicted target attributes and real target attributes of the test set.
-
+Calculate the model's test accuracy.
 ```{r}
-table(pred,test$Survived)
+mean(nb_pred==test$Survived)
 ```
 
-
-12. Calculate the model's test accuracy.
-
+# Train an xgb tree model:
 ```{r}
-mean(pred==test$Survived)
-```
-
-
-13. (Non-mandatory) Now train the same model using the caret package. This time set up a 10-fold cross validation configuration instead of the train-test split that was used before. (No need to set any parameters for the model, go with its default tuning grid).
-Set the *na.action* to "na.pass" in order for caret to pass NAs to C5.0 instead of failing.
-Check the model's average test accuracy, and the parameter values that gave the best accuracy.
-
-
-```{r}
-#install.packages("caret")
 library(caret)
+library(lattice)
+library(xgboost)
+
+
 set.seed(123)
-control <- trainControl(method="cv", number=10)
-fit.c50 <- train(Survived~., data=df, method="C5.0", metric="Accuracy", trControl=control,na.action = na.pass)
-fit.c50
+control <- trainControl(method="cv", number=5)
+
+grid <- expand.grid(.nrounds=20,.max_depth=6,.eta=c(0.1,0.3,0.5),.gamma=0.1,.colsample_bytree=0.5,.min_child_weight=0.01,.subsample=0.7)
+
+fit.xgb <- train(Survived~., data=df, method="xgbTree", metric="Accuracy", trControl=control, verbose=FALSE,tuneGrid =grid, na.action=na.pass)
+
+plot(fit.xgb)
+```
+Predict the target feature for records of the test set, using the trained model.
+```{r}
+xgb_pred <- predict(fit.xgb, test, na.action = na.pass)
+```
+
+Produce a confusion matrix between predicted target attributes and real target attributes of the test set.
+```{r}
+table(xgb_pred,test$Survived)
+```
+
+Calculate the model's test accuracy.
+```{r}
+mean(xgb_pred==test$Survived)
 ```
 
 
-14. Load the test file. Don't forget the empty strings issue when loading the file (na.strings = "").
+#Train a gbm decision-tree model based on the train data.
+```{r}
+library(caret)
+library(lattice)
+library(gbm)
 
+control <- trainControl(method="cv", number=5)
+grid <- expand.grid(.n.trees=c(5),.interaction.depth=6,.shrinkage=c(0.1,0.3,0.5),.n.minobsinnode=5)
+set.seed(123)
+fit.gbm <- train(Survived~., data=df, method="gbm", metric="Accuray", trControl=control, verbose=FALSE,tuneGrid =grid, na.action=na.pass)
+plot(fit.gbm)
+```
+
+Predict the target feature for records of the test set, using the trained model.
+```{r}
+gbm_pred <- predict(fit.gbm, test, na.action = na.pass)
+```
+
+Produce a confusion matrix between predicted target attributes and real target attributes of the test set.
+```{r}
+table(gbm_pred,test$Survived)
+```
+
+Calculate the model's test accuracy.
+```{r}
+mean(gbm_pred==test$Survived)
+```
+
+
+Load the test file.
 ```{r}
 new_df <-read.csv('Titanic/test.csv',na.strings = "")
 ```
 
-15. Create a vector with the PassengerIds of records in the test file. We will soon attach it to the prediction results.
-
+Create a vector with the PassengerIds of records in the test file. We will soon attach it to the prediction results.
 ```{r}
 ids<- new_df$PassengerId
 ```
 
 
-16. Repeat the same preprocessing steps that were performed on the train data (factorizing two features and ignoring three features). You must make sure that the train and test data have the same structure (except for the target feature)
-
+Repeat the same preprocessing steps that were performed on the train data (factorizing two features and ignoring three features). Train and test data must have the same structure (except for the target feature)
 ```{r}
 new_df$Pclass<- as.factor(new_df$Pclass)
 new_df<- new_df[,-c(1,3,8)]
 ```
 
 
-17. Another thing that is going to make troubles is that the test data contains some new levels in the *Cabin* feature that did not appear in the train data (you can check it by applying *Summary* on the test data). Add these new levels to the model.
+Another thing that is going to make troubles is that the test data contains some new levels in the *Cabin* feature that did not appear in the train data.
 
 - Getting the levels of the "Cabin" feature from a model *m*: m$xlevels[["Cabin"]]
 
@@ -170,30 +193,31 @@ new_df<- new_df[,-c(1,3,8)]
 
 
 ```{r}
-fit.c50$xlevels[["Cabin"]] <- union(fit.c50$xlevels[["Cabin"]], levels(new_df$Cabin))
+nb$xlevels[["Cabin"]] <- union(nb$xlevels[["Cabin"]], levels(new_df$Cabin))
+fit.xgb$xlevels[["Cabin"]] <- union(fit.xgb$xlevels[["Cabin"]], levels(new_df$Cabin))
+fit.gbm$xlevels[["Cabin"]] <- union(fit.gbm$xlevels[["Cabin"]], levels(new_df$Cabin))
 ```
 
 
-18. Load the test file and predict the target attribute for its records using your trained model. Don't forget to set *na.action* to "na.pass" if you used caret in the model creation, otherwise it will fail.
+Load the test file and predict the target attribute for its records using your trained model. Don't forget to set *na.action* to "na.pass" if you used caret in the model creation, otherwise it will fail.
 
 ```{r}
-new_pred<- predict(fit.c50,new_df,na.action = na.pass)
+new_nb_pred<- predict(nb,new_df,na.action = na.pass)
+new_xgb_pred<- predict(fit.xgb,new_df,na.action = na.pass)
+new_gbm_pred<- predict(fit.gbm,new_df,na.action = na.pass)
 ```
 
 
 19. Write the *PassengerId* and *Survived* attributes to a csv file and submit this file to kaggle's competition (You should first subscribe to the site). What is your score?
 
 ```{r}
-res <- cbind(PassengerId=ids,Survived=as.character(new_pred))
-write.csv(res,file="Titanic/try1.csv",row.names = F)
+nb_res <- cbind(PassengerId=ids,Survived=as.character(new_nb_pred))
+write.csv(nb_res,file="Titanic/naiveBayes.csv",row.names = F)
 
+xgb_res <- cbind(PassengerId=ids,Survived=as.character(new_xgb_pred))
+write.csv(xgb_res,file="Titanic/xgb.csv",row.names = F)
+
+gbm_res <- cbind(PassengerId=ids,Survived=as.character(new_gbm_pred))
+write.csv(gbm_res,file="Titanic/gbm.csv",row.names = F)
 ```
-
-That puts us around no. 3300 in the leaderboard with a 0.77990 accuracy score. :(
-
-
-20. Keep trying to improve your score by tuning parameters or by training other models. You can also try to do some data engineering and extract some relevant data from the features that we dumped.
-
-
-#### The last item is actually your next homework assignment. The full requirements will be forthcoming soon.
 
