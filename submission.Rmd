@@ -39,6 +39,7 @@ summary(df)
 
 It seems that the following features have too many categories or simply represent an index: PassengerId, Ticket, Name. We'll ignore these features.
 ```{r}
+df_no_cabin <- df[,-c(1,4,9, 11)]
 df <- df[,-c(1,4,9)]
 ```
 
@@ -48,6 +49,33 @@ Divide the features' names to numerics and factors:
 cols<- 1:dim(df)[2]
 factors <- cols[sapply(df,is.factor)]
 numerics <- cols[!sapply(df,is.factor)]
+```
+
+#Many algorithms deal with numerical input only.
+Convert our data to a numeric form, so we can examine random forest:
+```{r}
+df.numeric <- df_no_cabin
+df.numeric$Survived=as.numeric(df_no_cabin[,'Survived'] == "1")
+```
+
+Use CARET's *dummyVars* to convert nominal features to various dummies or flags, according to each feature's possible levels.
+```{r}
+library(caret)
+dmy <- dummyVars(" ~ .", data = df.numeric,fullRank=F)
+df.numeric <- data.frame(predict(dmy, newdata = df.numeric))
+head(df.numeric)
+```
+
+```{r}
+df.numeric$Survived<- as.factor(df.numeric$Survived)
+levels(df.numeric$Survived)<-c("x0","x1")
+```
+
+Omit records that contain empty values:
+```{r}
+empty_records <- df.numeric[rowSums(is.na(df.numeric)) > 0,]
+if (nrow(empty_records)>0)
+  df.numeric<- na.omit(df.numeric)
 ```
 
 Tide the data two times: the first is for categorial data and the second for numeric data.
@@ -83,26 +111,20 @@ test<- df[-indices,]
 ```
 
 # Train a naive bayes model:
+# Train a Random Forest model, evaluating it with ROC.
 ```{r}
-library(e1071)
-set.seed(13)
-nb <- naiveBayes(Survived~.,data = train)
+set.seed(123)
+fit.rf <- train(Survived~., data=df.numeric, method="rf",ntree = 10,  
+              metric='ROC', 
+              trControl=trainControl(method="cv", 
+                                         number=5,
+                                         savePredictions="final",
+                                         summaryFunction = twoClassSummary,
+                                         classProbs = TRUE),
+              tuneGrid=expand.grid(.mtry=c(5)),
+              na.action = na.pass)
 ```
 
-Predict the target feature for records of the test set, using the trained model.
-```{r}
-nb_pred <- predict(nb, test, na.action = na.pass)
-```
-
-Produce a confusion matrix between predicted target attributes and real target attributes of the test set.
-```{r}
-table(nb_pred,test$Survived)
-```
-
-Calculate the model's test accuracy.
-```{r}
-mean(nb_pred==test$Survived)
-```
 
 # Train an xgb tree model:
 ```{r}
@@ -165,6 +187,7 @@ mean(gbm_pred==test$Survived)
 ```
 
 
+### Results:
 Load the test file.
 ```{r}
 new_df <-read.csv('Titanic/test.csv',na.strings = "")
@@ -179,9 +202,17 @@ ids<- new_df$PassengerId
 Repeat the same preprocessing steps that were performed on the train data (factorizing two features and ignoring three features). Train and test data must have the same structure (except for the target feature)
 ```{r}
 new_df$Pclass<- as.factor(new_df$Pclass)
+new_df_no_cabin<- new_df[,-c(1,3,8,10)]
 new_df<- new_df[,-c(1,3,8)]
-```
 
+new_df.numeric <- new_df_no_cabin
+new_dmy <- dummyVars(" ~ .", data = new_df.numeric,fullRank=F)
+new_df.numeric <- data.frame(predict(new_dmy, newdata = new_df.numeric))
+head(new_df.numeric)
+empty_records <- new_df.numeric[rowSums(is.na(new_df.numeric)) > 0,]
+if (nrow(empty_records)>0)
+  new_df.numeric<- na.omit(new_df.numeric)
+```
 
 Another thing that is going to make troubles is that the test data contains some new levels in the *Cabin* feature that did not appear in the train data.
 
@@ -193,7 +224,6 @@ Another thing that is going to make troubles is that the test data contains some
 
 
 ```{r}
-nb$xlevels[["Cabin"]] <- union(nb$xlevels[["Cabin"]], levels(new_df$Cabin))
 fit.xgb$xlevels[["Cabin"]] <- union(fit.xgb$xlevels[["Cabin"]], levels(new_df$Cabin))
 fit.gbm$xlevels[["Cabin"]] <- union(fit.gbm$xlevels[["Cabin"]], levels(new_df$Cabin))
 ```
@@ -202,22 +232,22 @@ fit.gbm$xlevels[["Cabin"]] <- union(fit.gbm$xlevels[["Cabin"]], levels(new_df$Ca
 Load the test file and predict the target attribute for its records using your trained model. Don't forget to set *na.action* to "na.pass" if you used caret in the model creation, otherwise it will fail.
 
 ```{r}
-new_nb_pred<- predict(nb,new_df,na.action = na.pass)
 new_xgb_pred<- predict(fit.xgb,new_df,na.action = na.pass)
 new_gbm_pred<- predict(fit.gbm,new_df,na.action = na.pass)
+new_rf_pred<- predict(fit.rf,new_df.numeric,na.action = na.pass)
 ```
 
 
 19. Write the *PassengerId* and *Survived* attributes to a csv file and submit this file to kaggle's competition (You should first subscribe to the site). What is your score?
 
 ```{r}
-nb_res <- cbind(PassengerId=ids,Survived=as.character(new_nb_pred))
-write.csv(nb_res,file="Titanic/naiveBayes.csv",row.names = F)
-
 xgb_res <- cbind(PassengerId=ids,Survived=as.character(new_xgb_pred))
 write.csv(xgb_res,file="Titanic/xgb.csv",row.names = F)
 
 gbm_res <- cbind(PassengerId=ids,Survived=as.character(new_gbm_pred))
 write.csv(gbm_res,file="Titanic/gbm.csv",row.names = F)
+
+rf_res <- cbind(PassengerId=ids,Survived=as.character(new_rf_pred))
+write.csv(rf_res,file="Titanic/rf.csv",row.names = F)
 ```
 
